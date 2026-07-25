@@ -1,0 +1,72 @@
+@startuml BionicPRO_C4_model_task1
+
+!include <C4/C4_Container>
+
+title BionicPRO — управление учётными данными (региональный контейнерный контур)
+
+LAYOUT_LANDSCAPE()
+
+Person_Ext(prosthesis_buyer, "Покупатель протеза")
+Person_Ext(prosthesis_pilot, "Пилот протеза", "Пользователь приложения и протеза")
+
+System(prosthesis_chip, "Программа в чипе протеза", "Распознаёт движения, управляет актуаторами и передаёт телеметрию")
+Container(prosthesis_app, "Фронтенд приложения", "Web / Android / iOS", "Не хранит access/refresh tokens; получает только защищённую session cookie")
+
+System_Boundary(country_identity_services, "Удостоверяющие службы страны представительства") {
+  System_Ext(country_oidc_idp, "Внешний IdP (OIDC)", "Хранит исходную учётную запись, пароль и MFA")
+  System_Ext(country_saml_idp, "Внешний IdP (SAML 2.0)", "Альтернативная государственная или корпоративная служба")
+}
+
+System_Boundary(bionicpro, "BionicPRO") {
+  Container(online_store, "Интернет-магазин", "Битрикс24")
+  Container(crm, "CRM", "Битрикс24")
+  ContainerDb(crm_db, "CRM DB", "Реляционная БД", "Персональные данные в стране представительства")
+
+  Container(bff, "BFF / Token Handler", "Backend service", "Конфиденциальный OIDC-клиент; обрабатывает callback, сессии и обращения фронтенда к API")
+  Container(keycloak, "Identity Broker", "Keycloak", "Единая точка входа; федерация с региональными OIDC/SAML IdP и нормализация claims")
+  ContainerDb(keycloak_db, "Identity DB", "PostgreSQL", "Минимальная связка iss+sub с internal_user_id, роли, согласия; без паролей IdP")
+  ContainerDb(session_store, "Хранилище сессий BFF", "Redis", "Непрозрачная сессия и внутренние access/refresh tokens; TTL и ротация")
+
+  Container(api, "API", "Backend service", "Бизнес-операции, RBAC и проверка принадлежности протеза пользователю")
+  ContainerDb(database, "База данных", "PostgreSQL", "Персональные и медицинские данные региона")
+}
+
+Person(production_operator, "Оператор производства")
+Person(ml_engineer, "ML-инженер")
+Container(cli_tool, "CLI-инструмент ML", "Backend tool")
+
+Rel(prosthesis_buyer, online_store, "Выбор протеза, заказ, оплата", "HTTPS")
+Rel(online_store, crm, "Создаёт заказ", "HTTPS")
+Rel_Up(production_operator, crm, "Работает с заказом", "HTTPS")
+Rel(crm, crm_db, "Читает и изменяет данные", "SQL/TLS")
+
+Rel(prosthesis_pilot, prosthesis_app, "Использует приложение", "HTTPS")
+Rel(prosthesis_pilot, prosthesis_chip, "Предоставляет миосигналы")
+Rel(prosthesis_app, prosthesis_chip, "Локальное управление протезом", "Bluetooth")
+
+Rel(prosthesis_app, bff, "Вход и API-запросы; только HttpOnly session cookie", "HTTPS")
+Rel(prosthesis_app, keycloak, "Следует redirect-переходам; токены не получает", "HTTPS")
+Rel(bff, keycloak, "Обмен authorization code, refresh и logout по серверному каналу", "OIDC / HTTPS")
+Rel(keycloak, country_oidc_idp, "Identity brokering; минимальные scopes/claims", "OIDC / HTTPS")
+Rel(keycloak, country_saml_idp, "Identity brokering", "SAML 2.0 / HTTPS")
+Rel(keycloak, keycloak_db, "Хранит региональную конфигурацию", "SQL/TLS")
+Rel(bff, session_store, "Создаёт, читает, ротирует и удаляет серверные сессии", "TLS")
+Rel(bff, api, "Передаёт внутренний access token; фронтенд токен не видит", "HTTPS")
+Rel(api, keycloak, "Получает JWKS; проверяет issuer, audience, expiry и подпись", "HTTPS")
+
+Rel(prosthesis_chip, api, "Отправляет техническую телеметрию", "HTTPS / device credentials")
+Rel(api, database, "Читает и изменяет локальные данные; проверяет user_id → prosthesis_id", "SQL/TLS")
+Rel(ml_engineer, cli_tool, "Запускает операции")
+Rel(cli_tool, database, "Работает с разрешёнными региональными данными", "TLS")
+
+note bottom of bionicpro
+  Этот контур является шаблоном развертывания.
+  Для каждой страны создаётся отдельный экземпляр,
+  подключённый только к местным разрешённым IdP.
+  Пользовательские и медицинские данные между
+  региональными контурами не реплицируются.
+end note
+
+SHOW_LEGEND()
+
+@enduml

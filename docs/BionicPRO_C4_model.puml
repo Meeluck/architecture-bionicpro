@@ -1,0 +1,46 @@
+@startuml BionicPRO_C4_model
+
+!include <C4/C4_Container>
+
+title Контейнерная диаграмма BionicPRO
+
+LAYOUT_LEFT_RIGHT()
+
+Person_Ext(prosthesis_buyer, "Покупатель протеза")
+Person_Ext(prosthesis_pilot, "Пилот протеза", "С этого человека считываются данные")
+
+System_Ext(prosthesis_chip, "Программа в чипе протеза", "Чтение данных с датчиков, распознавание движений и их воспроизводство. Чтение команд из приложения и их воспроизводство, передача телеметрии")
+
+Container_Ext(prosthesis_app, "Приложение для донастройки протеза", "iOD, Android")
+
+System_Boundary(bionicpro, "BionicPRO") {
+  Container(online_store, "Интернет-магазин", "Битрикс24")
+  Container(crm, "CRM", "Битрикс24")
+  ContainerDb(crm_db, "CRM DB", "e.g. Oracle Database 12")
+
+  Container(api, "API", "e.g. SpringBoot, ElasticSearch, etc.")
+  ContainerDb(database, "База данных", "PostgreSQL")
+}
+
+Person(production_operator, "Оператор производства")
+Person(ml_engineer, "ML-инженер")
+Container_Ext(cli_tool, "cli tool", "e.g. SpringBoot, ElasticSearch, etc.")
+
+Rel(prosthesis_buyer, online_store, "Выбор протеза, заказ, оплата")
+Rel(online_store, crm, "")
+Rel(production_operator, crm, "")
+Rel(crm, crm_db, "")
+
+Rel(prosthesis_pilot, prosthesis_chip, "Предоставление миосигналов")
+Rel(prosthesis_pilot, prosthesis_app, "")
+Rel(prosthesis_app, prosthesis_chip, "Управление протезом")
+Rel(prosthesis_chip, api, "Отправка технической телеметрии")
+Rel(prosthesis_app, api, "")
+Rel(api, database, "")
+
+Rel(ml_engineer, cli_tool, "")
+Rel(cli_tool, database, "")
+
+SHOW_LEGEND()
+
+@enduml

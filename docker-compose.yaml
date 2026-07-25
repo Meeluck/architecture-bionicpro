@@ -1,4 +1,42 @@
-version: '3.8'
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+    dockerfile: Dockerfile
+  environment: &airflow-common-environment
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_db:5432/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: bionicpro-training-secret
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+    CRM_DB_HOST: crm_db
+    CRM_DB_PORT: "5432"
+    CRM_DB_NAME: crm
+    CRM_DB_USER: crm_reader
+    CRM_DB_PASSWORD: crm_reader_password
+    TELEMETRY_DB_HOST: telemetry_db
+    TELEMETRY_DB_PORT: "5432"
+    TELEMETRY_DB_NAME: telemetry
+    TELEMETRY_DB_USER: telemetry_reader
+    TELEMETRY_DB_PASSWORD: telemetry_reader_password
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_HTTP_PORT: "8123"
+    CLICKHOUSE_DB: bionicpro
+    CLICKHOUSE_USER: bionicpro
+    CLICKHOUSE_PASSWORD: bionicpro_password
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    airflow_db:
+      condition: service_healthy
+    crm_db:
+      condition: service_healthy
+    telemetry_db:
+      condition: service_healthy
+    clickhouse:
+      condition: service_healthy
 
 services:
   keycloak_db:
@@ -11,6 +49,7 @@ services:
       - ./postgres-keycloak-data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
+
   keycloak:
     image: quay.io/keycloak/keycloak:21.1
     environment:
@@ -29,14 +68,192 @@ services:
       - "8080:8080"
     depends_on:
       - keycloak_db
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: http://localhost:8000
+        REACT_APP_KEYCLOAK_URL: http://localhost:8080
+        REACT_APP_KEYCLOAK_REALM: reports-realm
+        REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
     ports:
       - "3000:3000"
+
+  reports_api:
+    build:
+      context: ./reports-api
+      dockerfile: Dockerfile
     environment:
-      REACT_APP_API_URL: http://localhost:8000
-      REACT_APP_KEYCLOAK_URL: http://localhost:8080
-      REACT_APP_KEYCLOAK_REALM: reports-realm
-      REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
+      PORT: "8000"
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/reports-realm
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/reports-realm/protocol/openid-connect/certs
+      JWT_AUDIENCE: reports-api
+      JWT_REQUIRED_ROLE: prothetic_user
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: bionicpro
+      CLICKHOUSE_USER: reports_api
+      CLICKHOUSE_PASSWORD: reports_api_password
+      CORS_ALLOWED_ORIGIN: http://localhost:3000
+      DEFAULT_REPORT_RANGE_HOURS: "720"
+      MAX_REPORT_RANGE_HOURS: "744"
+    ports:
+      - "8000:8000"
+    depends_on:
+      keycloak:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --output-document=- http://localhost:8000/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  crm_db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm_owner
+      POSTGRES_PASSWORD: crm_owner_password
+    volumes:
+      - crm_data:/var/lib/postgresql/data
+      - ./airflow/sql/crm:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm_owner -d crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  telemetry_db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: telemetry
+      POSTGRES_USER: telemetry_owner
+      POSTGRES_PASSWORD: telemetry_owner_password
+    volumes:
+      - telemetry_data:/var/lib/postgresql/data
+      - ./airflow/sql/telemetry:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telemetry_owner -d telemetry"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: bionicpro
+      CLICKHOUSE_USER: bionicpro
+      CLICKHOUSE_PASSWORD: bionicpro_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./airflow/sql/clickhouse:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "8124:8123"
+      - "9001:9000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "clickhouse-client --user bionicpro --password bionicpro_password --database bionicpro --query 'SELECT 1'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  airflow_db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  airflow_init:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - >-
+        airflow db migrate &&
+        (airflow users create
+        --username admin
+        --password admin
+        --firstname BionicPRO
+        --lastname Admin
+        --role Admin
+        --email admin@example.local || true)
+    restart: "no"
+
+  airflow_webserver:
+    <<: *airflow-common
+    command: webserver
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      airflow_db:
+        condition: service_healthy
+      crm_db:
+        condition: service_healthy
+      telemetry_db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  airflow_scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      airflow_db:
+        condition: service_healthy
+      crm_db:
+        condition: service_healthy
+      telemetry_db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  crm_data:
+  telemetry_data:
+  clickhouse_data:
+  airflow_db_data:
+  airflow_logs:
