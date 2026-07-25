@@ -39,7 +39,7 @@
 
 ### 2.2. Keycloak как Identity Broker
 
-Keycloak предоставляет BionicPRO единый OIDC-интерфейс и преобразует атрибутыразных IdP в канонические claims. Поддерживаются:
+Keycloak предоставляет BionicPRO единый OIDC-интерфейс и преобразует атрибуты разных IdP в канонические claims. Поддерживаются:
 
 - OIDC-провайдеры;
 - SAML 2.0-провайдеры;
@@ -63,6 +63,4 @@ __Host-bionicpro-session=<случайный идентификатор>;
 Secure; HttpOnly; SameSite=Lax; Path=/
 ```
 
-В cookie нет JWT, персональных данных или токена IdP. JavaScript не может
-прочитать cookie из-за `HttpOnly`. Для изменяющих состояние запросов BFF
-дополнительно проверяет CSRF-токен и `Origin`.
+В cookie нет JWT, персональных данных или токена IdP. JavaScript не может прочитать cookie из-за `HttpOnly`. Для изменяющих состояние запросов BFF дополнительно проверяет CSRF-токен и `Origin`.

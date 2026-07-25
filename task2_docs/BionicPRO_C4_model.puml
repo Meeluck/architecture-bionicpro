@@ -4,21 +4,24 @@
 
 title BionicPRO — подготовка и получение отчётов
 
-LAYOUT_LEFT_RIGHT()
+LAYOUT_LANDSCAPE()
 
 Person_Ext(prosthesis_buyer, "Покупатель протеза")
 Person_Ext(prosthesis_pilot, "Пилот протеза", "Пользователь приложения и владелец данных отчёта")
 
 System(prosthesis_chip, "Программа в чипе протеза", "Читает миосигналы, управляет протезом и передаёт техническую телеметрию")
-Container(prosthesis_app, "Приложение для донастройки протеза", "iOS / Android", "Управление протезом и запрос отчёта")
-System_Ext(identity_service, "Сервис аутентификации", "OIDC / OAuth 2.0", "Выдаёт подтверждённую пользовательскую идентичность; детали потока вне этой задачи")
+Container(prosthesis_app, "UI приложения BionicPRO", "React / TypeScript", "Аутентифицирует пользователя и предоставляет кнопку скачивания собственного отчёта в CSV")
 
 System_Boundary(bionicpro, "BionicPRO") {
   Container(online_store, "Интернет-магазин", "Битрикс24")
   Container(crm, "CRM", "Битрикс24", "Заказы, клиенты и связь пользователя с протезами")
   ContainerDb(crm_db, "CRM DB", "Реляционная БД", "Операционные клиентские данные")
 
-  Container(api, "API", "Backend service", "Принимает телеметрию и предоставляет GET /reports текущему пользователю")
+  Container(identity_service, "Сервис аутентификации", "Keycloak", "Аутентифицирует пользователей, выдаёт JWT и публикует JWKS")
+  ContainerDb(keycloak_db, "Keycloak DB", "PostgreSQL", "Пользователи, роли и конфигурация realm reports-realm")
+
+  Container(api, "API", "Backend service", "Принимает телеметрию и обслуживает команды управления протезом")
+  Container(reports_api, "Сервис отчётов", "Go / REST API", "Предоставляет GET /reports; проверяет JWT и разрешает пользователю читать только собственный отчёт")
   ContainerDb(database, "Операционная БД", "PostgreSQL", "Телеметрия и операционные данные приложения")
 
   Container(airflow, "ETL-оркестратор", "Apache Airflow", "Инкрементально извлекает данные, строит и публикует отчётную витрину")
@@ -32,25 +35,27 @@ Container(cli_tool, "CLI-инструмент ML", "Backend tool")
 
 Rel(prosthesis_buyer, online_store, "Выбор протеза, заказ и оплата", "HTTPS")
 Rel(online_store, crm, "Создаёт заказ", "HTTPS")
-Rel(production_operator, crm, "Работает с заказом", "HTTPS")
+Rel_Up(production_operator, crm, "Работает с заказом", "HTTPS")
 Rel(crm, crm_db, "Читает и изменяет клиентские данные", "SQL / TLS")
 
 Rel(prosthesis_pilot, prosthesis_chip, "Предоставляет миосигналы")
-Rel(prosthesis_pilot, prosthesis_app, "Использует приложение")
+Rel_Down(prosthesis_pilot, prosthesis_app, "Входит в приложение и скачивает собственный отчёт")
 Rel(prosthesis_app, prosthesis_chip, "Локальное управление протезом", "Bluetooth")
-Rel(prosthesis_app, identity_service, "Проходит аутентификацию", "OIDC / HTTPS")
-Rel(prosthesis_app, api, "Отправляет команды и запрашивает свой отчёт", "HTTPS + access token")
-Rel(api, identity_service, "Проверяет пользовательскую идентичность и токен", "OIDC / HTTPS")
+Rel(prosthesis_app, identity_service, "Выполняет Authorization Code Flow с PKCE и получает JWT", "OIDC / HTTPS")
+Rel(prosthesis_app, api, "Отправляет команды управления", "HTTPS + access token")
+Rel(prosthesis_app, reports_api, "Запрашивает собственный отчёт", "GET /reports + Bearer JWT / HTTPS")
+Rel(reports_api, identity_service, "Получает JWKS для проверки подписи, issuer, audience, срока и роли JWT", "OIDC / HTTPS")
+Rel(identity_service, keycloak_db, "Хранит пользователей, роли и конфигурацию realm", "SQL / TLS")
 
 Rel(prosthesis_chip, api, "Отправляет техническую телеметрию", "HTTPS / device credentials")
 Rel(api, database, "Записывает телеметрию и читает операционные данные", "SQL / TLS")
 
-Rel(airflow, crm_db, "Читает инкремент клиентов и связей с протезами", "Read-only SQL / TLS")
-Rel(airflow, database, "Читает инкремент телеметрии", "Read-only SQL / TLS")
+Rel(airflow, crm_db, "Читает инкремент клиентов и связей с протезами", "SQL / TLS")
+Rel(airflow, database, "Читает инкремент телеметрии", "SQL / TLS")
 Rel(airflow, olap_db, "Загружает staging, объединяет данные, публикует витрину", "Native protocol / TLS")
 Rel(airflow, airflow_db, "Хранит метаданные", "SQL / TLS")
 
-Rel(api, olap_db, "Читает готовую витрину по authenticated user_id и обработанному периоду", "Read-only SQL / TLS")
+Rel(reports_api, olap_db, "Читает готовую витрину по JWT sub и обработанному периоду", "HTTP / TLS")
 
 Rel(ml_engineer, cli_tool, "Запускает ML-операции")
 Rel(cli_tool, database, "Читает разрешённые операционные данные", "TLS")

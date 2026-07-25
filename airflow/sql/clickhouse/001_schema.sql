@@ -56,3 +56,8 @@ CREATE TABLE IF NOT EXISTS bionicpro.etl_state
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY pipeline;
 
+CREATE USER IF NOT EXISTS reports_api
+IDENTIFIED WITH sha256_password BY 'reports_api_password';
+
+GRANT SELECT ON bionicpro.report_by_user_hour TO reports_api;
+GRANT SELECT ON bionicpro.etl_state TO reports_api;

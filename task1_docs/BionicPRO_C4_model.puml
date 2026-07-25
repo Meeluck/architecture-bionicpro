@@ -4,8 +4,6 @@
 
 title BionicPRO — управление учётными данными (региональный контейнерный контур)
 
-' LAYOUT_LEFT_RIGHT()
-' LAYOUT_TOP_DOWN()
 LAYOUT_LANDSCAPE()
 
 Person_Ext(prosthesis_buyer, "Покупатель протеза")

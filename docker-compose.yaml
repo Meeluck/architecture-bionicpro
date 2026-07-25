@@ -73,13 +73,44 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: http://localhost:8000
+        REACT_APP_KEYCLOAK_URL: http://localhost:8080
+        REACT_APP_KEYCLOAK_REALM: reports-realm
+        REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
     ports:
       - "3000:3000"
+
+  reports_api:
+    build:
+      context: ./reports-api
+      dockerfile: Dockerfile
     environment:
-      REACT_APP_API_URL: http://localhost:8000
-      REACT_APP_KEYCLOAK_URL: http://localhost:8080
-      REACT_APP_KEYCLOAK_REALM: reports-realm
-      REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
+      PORT: "8000"
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/reports-realm
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/reports-realm/protocol/openid-connect/certs
+      JWT_AUDIENCE: reports-api
+      JWT_REQUIRED_ROLE: prothetic_user
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: bionicpro
+      CLICKHOUSE_USER: reports_api
+      CLICKHOUSE_PASSWORD: reports_api_password
+      CORS_ALLOWED_ORIGIN: http://localhost:3000
+      DEFAULT_REPORT_RANGE_HOURS: "720"
+      MAX_REPORT_RANGE_HOURS: "744"
+    ports:
+      - "8000:8000"
+    depends_on:
+      keycloak:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --output-document=- http://localhost:8000/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 
   crm_db:
     image: postgres:14
